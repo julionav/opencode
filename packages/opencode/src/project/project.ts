@@ -13,6 +13,7 @@ import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { existsSync } from "fs"
 import { git } from "../util/git"
+import { Runtime } from "@/runtime"
 
 export namespace Project {
   const log = Log.create({ service: "project" })
@@ -83,7 +84,7 @@ export namespace Project {
       if (dotgit) {
         let sandbox = path.dirname(dotgit)
 
-        const gitBinary = Bun.which("git")
+        const gitBinary = Runtime.which("git")
 
         // cached id calculation
         let id = await Filesystem.readText(path.join(dotgit, "opencode"))

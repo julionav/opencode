@@ -5,9 +5,10 @@ import { Global } from "../global"
 import { Filesystem } from "../util/filesystem"
 import { lazy } from "../util/lazy"
 import { Lock } from "../util/lock"
-import { $ } from "bun"
 import { NamedError } from "@opencode-ai/util/error"
 import z from "zod"
+import { Runtime } from "@/runtime"
+import { spawn } from "node:child_process"
 
 export namespace Storage {
   const log = Log.create({ service: "storage" })
@@ -21,42 +22,63 @@ export namespace Storage {
     }),
   )
 
-  const MIGRATIONS: Migration[] = [
+  function exec(cmd: string, args: string[], opts: { cwd: string }) {
+    return new Promise<{ code: number; stdout: string }>((resolve) => {
+      const proc = spawn(cmd, args, {
+        cwd: opts.cwd,
+        stdio: ["ignore", "pipe", "ignore"],
+      })
+      let out = ""
+      proc.stdout?.on("data", (chunk) => {
+        out += chunk.toString()
+      })
+      proc.on("close", (code) => resolve({ code: code ?? 1, stdout: out }))
+      proc.on("error", () => resolve({ code: 1, stdout: "" }))
+    })
+  }
+
+  const MIGRATIONS: Migration[] = Runtime.mode() === "webcontainer" ? [] : [
     async (dir) => {
       const project = path.resolve(dir, "../project")
       if (!(await Filesystem.isDir(project))) return
-      for await (const projectDir of new Bun.Glob("*").scan({
+      const projects = await Runtime.glob("*", {
         cwd: project,
+        absolute: false,
+        onlyDirectories: true,
         onlyFiles: false,
-      })) {
+        dot: false,
+        followSymlinks: false,
+      })
+      for (const projectDir of projects) {
         log.info(`migrating project ${projectDir}`)
         let projectID = projectDir
         const fullProjectDir = path.join(project, projectDir)
         let worktree = "/"
 
         if (projectID !== "global") {
-          for await (const msgFile of new Bun.Glob("storage/session/message/*/*.json").scan({
+          const msgs = await Runtime.glob("storage/session/message/*/*.json", {
             cwd: path.join(project, projectDir),
             absolute: true,
-          })) {
+            onlyFiles: true,
+            dot: true,
+          })
+          for (const msgFile of msgs) {
             const json = await Filesystem.readJson<any>(msgFile)
             worktree = json.path?.root
             if (worktree) break
           }
           if (!worktree) continue
           if (!(await Filesystem.isDir(worktree))) continue
-          const [id] = await $`git rev-list --max-parents=0 --all`
-            .quiet()
-            .nothrow()
-            .cwd(worktree)
-            .text()
-            .then((x) =>
-              x
-                .split("\n")
-                .filter(Boolean)
-                .map((x) => x.trim())
-                .toSorted(),
-            )
+          const bin = Runtime.which("git")
+          const [id] = bin
+            ? await exec(bin, ["rev-list", "--max-parents=0", "--all"], { cwd: worktree }).then((result) =>
+                result.stdout
+                  .split("\n")
+                  .filter(Boolean)
+                  .map((x) => x.trim())
+                  .toSorted(),
+              )
+            : []
           if (!id) continue
           projectID = id
 
@@ -71,10 +93,13 @@ export namespace Storage {
           })
 
           log.info(`migrating sessions for project ${projectID}`)
-          for await (const sessionFile of new Bun.Glob("storage/session/info/*.json").scan({
+          const sessions = await Runtime.glob("storage/session/info/*.json", {
             cwd: fullProjectDir,
             absolute: true,
-          })) {
+            onlyFiles: true,
+            dot: true,
+          })
+          for (const sessionFile of sessions) {
             const dest = path.join(dir, "session", projectID, path.basename(sessionFile))
             log.info("copying", {
               sessionFile,
@@ -83,10 +108,13 @@ export namespace Storage {
             const session = await Filesystem.readJson<any>(sessionFile)
             await Filesystem.writeJson(dest, session)
             log.info(`migrating messages for session ${session.id}`)
-            for await (const msgFile of new Bun.Glob(`storage/session/message/${session.id}/*.json`).scan({
+            const sessionMsgs = await Runtime.glob(`storage/session/message/${session.id}/*.json`, {
               cwd: fullProjectDir,
               absolute: true,
-            })) {
+              onlyFiles: true,
+              dot: true,
+            })
+            for (const msgFile of sessionMsgs) {
               const dest = path.join(dir, "message", session.id, path.basename(msgFile))
               log.info("copying", {
                 msgFile,
@@ -96,12 +124,13 @@ export namespace Storage {
               await Filesystem.writeJson(dest, message)
 
               log.info(`migrating parts for message ${message.id}`)
-              for await (const partFile of new Bun.Glob(`storage/session/part/${session.id}/${message.id}/*.json`).scan(
-                {
-                  cwd: fullProjectDir,
-                  absolute: true,
-                },
-              )) {
+              const parts = await Runtime.glob(`storage/session/part/${session.id}/${message.id}/*.json`, {
+                cwd: fullProjectDir,
+                absolute: true,
+                onlyFiles: true,
+                dot: true,
+              })
+              for (const partFile of parts) {
                 const dest = path.join(dir, "part", message.id, path.basename(partFile))
                 const part = await Filesystem.readJson(partFile)
                 log.info("copying", {
@@ -116,10 +145,13 @@ export namespace Storage {
       }
     },
     async (dir) => {
-      for await (const item of new Bun.Glob("session/*/*.json").scan({
+      const items = await Runtime.glob("session/*/*.json", {
         cwd: dir,
         absolute: true,
-      })) {
+        onlyFiles: true,
+        dot: true,
+      })
+      for (const item of items) {
         const session = await Filesystem.readJson<any>(item)
         if (!session.projectID) continue
         if (!session.summary?.diffs) continue
@@ -202,16 +234,17 @@ export namespace Storage {
     })
   }
 
-  const glob = new Bun.Glob("**/*")
   export async function list(prefix: string[]) {
     const dir = await state().then((x) => x.dir)
     try {
-      const result = await Array.fromAsync(
-        glob.scan({
-          cwd: path.join(dir, ...prefix),
-          onlyFiles: true,
-        }),
-      ).then((results) => results.map((x) => [...prefix, ...x.slice(0, -5).split(path.sep)]))
+      const results = await Runtime.glob("**/*", {
+        cwd: path.join(dir, ...prefix),
+        absolute: false,
+        onlyFiles: true,
+        dot: true,
+        followSymlinks: false,
+      })
+      const result = results.map((x) => [...prefix, ...x.slice(0, -5).split(path.sep)])
       result.sort()
       return result
     } catch {

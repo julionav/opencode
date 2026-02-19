@@ -12,6 +12,7 @@ import { Flag } from "@/flag/flag"
 import { Bus } from "@/bus"
 import { Session } from "@/session"
 import { Discovery } from "./discovery"
+import { Runtime } from "@/runtime"
 
 export namespace Skill {
   const log = Log.create({ service: "skill" })
@@ -44,10 +45,9 @@ export namespace Skill {
   // External skill directories to search for (project-level and global)
   // These follow the directory layout used by Claude Code and other agents.
   const EXTERNAL_DIRS = [".claude", ".agents"]
-  const EXTERNAL_SKILL_GLOB = new Bun.Glob("skills/**/SKILL.md")
-
-  const OPENCODE_SKILL_GLOB = new Bun.Glob("{skill,skills}/**/SKILL.md")
-  const SKILL_GLOB = new Bun.Glob("**/SKILL.md")
+  const EXTERNAL_SKILL_GLOB = "skills/**/SKILL.md"
+  const OPENCODE_SKILL_GLOB = "{skill,skills}/**/SKILL.md"
+  const SKILL_GLOB = "**/SKILL.md"
 
   export const state = Instance.state(async () => {
     const skills: Record<string, Info> = {}
@@ -88,19 +88,17 @@ export namespace Skill {
     }
 
     const scanExternal = async (root: string, scope: "global" | "project") => {
-      return Array.fromAsync(
-        EXTERNAL_SKILL_GLOB.scan({
-          cwd: root,
-          absolute: true,
-          onlyFiles: true,
-          followSymlinks: true,
-          dot: true,
-        }),
-      )
-        .then((matches) => Promise.all(matches.map(addSkill)))
-        .catch((error) => {
-          log.error(`failed to scan ${scope} skills`, { dir: root, error })
-        })
+      const matches = await Runtime.glob(EXTERNAL_SKILL_GLOB, {
+        cwd: root,
+        absolute: true,
+        onlyFiles: true,
+        followSymlinks: true,
+        dot: true,
+      }).catch((error) => {
+        log.error(`failed to scan ${scope} skills`, { dir: root, error })
+        return [] as string[]
+      })
+      await Promise.all(matches.map(addSkill))
     }
 
     // Scan external skill directories (.claude/skills/, .agents/skills/, etc.)
@@ -123,12 +121,14 @@ export namespace Skill {
 
     // Scan .opencode/skill/ directories
     for (const dir of await Config.directories()) {
-      for await (const match of OPENCODE_SKILL_GLOB.scan({
+      const matches = await Runtime.glob(OPENCODE_SKILL_GLOB, {
         cwd: dir,
         absolute: true,
         onlyFiles: true,
         followSymlinks: true,
-      })) {
+        dot: true,
+      })
+      for (const match of matches) {
         await addSkill(match)
       }
     }
@@ -142,12 +142,14 @@ export namespace Skill {
         log.warn("skill path not found", { path: resolved })
         continue
       }
-      for await (const match of SKILL_GLOB.scan({
+      const matches = await Runtime.glob(SKILL_GLOB, {
         cwd: resolved,
         absolute: true,
         onlyFiles: true,
         followSymlinks: true,
-      })) {
+        dot: true,
+      })
+      for (const match of matches) {
         await addSkill(match)
       }
     }
@@ -157,12 +159,14 @@ export namespace Skill {
       const list = await Discovery.pull(url)
       for (const dir of list) {
         dirs.add(dir)
-        for await (const match of SKILL_GLOB.scan({
+        const matches = await Runtime.glob(SKILL_GLOB, {
           cwd: dir,
           absolute: true,
           onlyFiles: true,
           followSymlinks: true,
-        })) {
+          dot: true,
+        })
+        for (const match of matches) {
           await addSkill(match)
         }
       }

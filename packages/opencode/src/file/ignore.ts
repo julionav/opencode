@@ -1,4 +1,5 @@
 import { sep } from "node:path"
+import { Minimatch } from "minimatch"
 
 export namespace FileIgnore {
   const FOLDERS = new Set([
@@ -53,15 +54,24 @@ export namespace FileIgnore {
     "**/.nyc_output/**",
   ]
 
-  const FILE_GLOBS = FILES.map((p) => new Bun.Glob(p))
+  type Glob = Pick<Minimatch, "match">
+
+  const FILE_GLOBS: Glob[] = FILES.map(
+    (p) =>
+      new Minimatch(p, {
+        dot: true,
+        nocase: process.platform === "win32",
+        nocomment: true,
+      }),
+  )
 
   export const PATTERNS = [...FILES, ...FOLDERS]
 
   export function match(
     filepath: string,
     opts?: {
-      extra?: Bun.Glob[]
-      whitelist?: Bun.Glob[]
+      extra?: Glob[]
+      whitelist?: Glob[]
     },
   ) {
     for (const glob of opts?.whitelist || []) {
