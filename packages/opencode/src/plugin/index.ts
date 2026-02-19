@@ -23,11 +23,13 @@ export namespace Plugin {
       return { hooks: [] as Hooks[] }
     }
 
-    const { Server } = await import("../server/server")
-    const { BunProc } = await import("../bun")
-    const { CodexAuthPlugin } = await import("./codex")
-    const { CopilotAuthPlugin } = await import("./copilot")
-    const { gitlabAuthPlugin: GitlabAuthPlugin } = await import("@gitlab/opencode-gitlab-auth")
+    const { Server } = await Runtime.load<typeof import("../server/server")>("../server/server")
+    const { BunProc } = await Runtime.load<typeof import("../bun")>("../bun")
+    const { CodexAuthPlugin } = await Runtime.load<typeof import("./codex")>("./codex")
+    const { CopilotAuthPlugin } = await Runtime.load<typeof import("./copilot")>("./copilot")
+    const { gitlabAuthPlugin: GitlabAuthPlugin } = await Runtime.load<typeof import("@gitlab/opencode-gitlab-auth")>(
+      "@gitlab/opencode-gitlab-auth",
+    )
 
     // Built-in plugins that are directly imported (not installed from npm)
     const internal: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin]

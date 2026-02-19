@@ -14,11 +14,21 @@ const bun = (globalThis as unknown as { Bun?: BunLike }).Bun
 export namespace Runtime {
   export type Mode = "bun" | "node" | "webcontainer"
 
+  const importer = new Function("p", "return import(p)") as (p: string) => Promise<unknown>
+
   export function mode(): Mode {
     const forced = process.env.OPENCODE_RUNTIME
     if (forced === "bun" || forced === "node" || forced === "webcontainer") return forced
     if (typeof process.versions.bun === "string") return "bun"
     return "node"
+  }
+
+  /**
+   * Runtime `import()` that is intentionally opaque to bundlers.
+   * This lets the webcontainer/node bundle avoid pulling in Bun-only modules.
+   */
+  export async function load<T = unknown>(specifier: string): Promise<T> {
+    return importer(specifier) as Promise<T>
   }
 
   export function assertWebContainerMode() {

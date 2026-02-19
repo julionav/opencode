@@ -283,7 +283,7 @@ export namespace Config {
 
     // Install any additional dependencies defined in the package.json
     // This allows local plugins and custom tools to use external packages
-    const { BunProc } = await import("@/bun")
+    const { BunProc } = await Runtime.load<typeof import("@/bun")>("@/bun")
     await BunProc.run(
       [
         "install",
@@ -327,7 +327,7 @@ export namespace Config {
 
     const targetVersion = Installation.isLocal() ? "latest" : Installation.VERSION
     if (targetVersion === "latest") {
-      const { PackageRegistry } = await import("@/bun/registry")
+      const { PackageRegistry } = await Runtime.load<typeof import("@/bun/registry")>("@/bun/registry")
       const isOutdated = await PackageRegistry.isOutdated("@opencode-ai/plugin", depVersion, dir)
       if (!isOutdated) return false
       log.info("Cached version is outdated, proceeding with install", {

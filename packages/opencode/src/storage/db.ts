@@ -30,9 +30,9 @@ const log = Log.create({ service: "db" })
 
 const bun = Runtime.mode() === "bun"
 
-const bunSqlite = bun ? await import("bun:sqlite") : undefined
-const bunDriver = bun ? await import("drizzle-orm/bun-sqlite") : undefined
-const bunMigrator = bun ? await import("drizzle-orm/bun-sqlite/migrator") : undefined
+const bunSqlite = bun ? await Runtime.load<any>("bun:sqlite") : undefined
+const bunDriver = bun ? await Runtime.load<any>("drizzle-orm/bun-sqlite") : undefined
+const bunMigrator = bun ? await Runtime.load<any>("drizzle-orm/bun-sqlite/migrator") : undefined
 
 const sqljsInit = bun ? undefined : (await import("sql.js")).default
 const sqlDriver = bun ? undefined : await import("drizzle-orm/sql-js")

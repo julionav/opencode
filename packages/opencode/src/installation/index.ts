@@ -7,7 +7,7 @@ import { iife } from "@/util/iife"
 import { Flag } from "../flag/flag"
 import { Runtime } from "@/runtime"
 
-const shell = Runtime.mode() === "bun" ? (await import("bun")).$ : undefined
+const shell = Runtime.mode() === "bun" ? (await Runtime.load<typeof import("bun")>("bun")).$ : undefined
 
 declare global {
   const OPENCODE_VERSION: string
