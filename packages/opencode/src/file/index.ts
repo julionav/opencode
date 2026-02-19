@@ -1,6 +1,5 @@
 import { BusEvent } from "@/bus/bus-event"
 import z from "zod"
-import { $ } from "bun"
 import { formatPatch, structuredPatch } from "diff"
 import path from "path"
 import fs from "fs"
@@ -8,9 +7,10 @@ import ignore from "ignore"
 import { Log } from "../util/log"
 import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
-import { Ripgrep } from "./ripgrep"
 import fuzzysort from "fuzzysort"
 import { Global } from "../global"
+import { Runtime } from "@/runtime"
+import { git } from "@/util/git"
 
 export namespace File {
   const log = Log.create({ service: "file" })
@@ -379,7 +379,15 @@ export namespace File {
       }
 
       const set = new Set<string>()
-      for await (const file of Ripgrep.files({ cwd: Instance.directory })) {
+      const files = await Runtime.glob("**/*", {
+        cwd: Instance.directory,
+        absolute: false,
+        onlyFiles: true,
+        dot: true,
+        followSymlinks: true,
+      })
+      for (const file of files) {
+        if (file.startsWith(".git" + path.sep) || file === ".git") continue
         result.files.push(file)
         let current = file
         while (true) {
@@ -417,12 +425,11 @@ export namespace File {
   export async function status() {
     const project = Instance.project
     if (project.vcs !== "git") return []
+    if (!Runtime.which("git")) return []
 
-    const diffOutput = await $`git -c core.quotepath=false diff --numstat HEAD`
-      .cwd(Instance.directory)
-      .quiet()
-      .nothrow()
-      .text()
+    const diffOutput = await git(["-c", "core.quotepath=false", "diff", "--numstat", "HEAD"], { cwd: Instance.directory })
+      .then((x) => x.text())
+      .catch(() => "")
 
     const changedFiles: Info[] = []
 
@@ -439,11 +446,11 @@ export namespace File {
       }
     }
 
-    const untrackedOutput = await $`git -c core.quotepath=false ls-files --others --exclude-standard`
-      .cwd(Instance.directory)
-      .quiet()
-      .nothrow()
-      .text()
+    const untrackedOutput = await git(["-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"], {
+      cwd: Instance.directory,
+    })
+      .then((x) => x.text())
+      .catch(() => "")
 
     if (untrackedOutput.trim()) {
       const untrackedFiles = untrackedOutput.trim().split("\n")
@@ -464,11 +471,11 @@ export namespace File {
     }
 
     // Get deleted files
-    const deletedOutput = await $`git -c core.quotepath=false diff --name-only --diff-filter=D HEAD`
-      .cwd(Instance.directory)
-      .quiet()
-      .nothrow()
-      .text()
+    const deletedOutput = await git(["-c", "core.quotepath=false", "diff", "--name-only", "--diff-filter=D", "HEAD"], {
+      cwd: Instance.directory,
+    })
+      .then((x) => x.text())
+      .catch(() => "")
 
     if (deletedOutput.trim()) {
       const deletedFiles = deletedOutput.trim().split("\n")
@@ -535,11 +542,11 @@ export namespace File {
 
     const content = (await Filesystem.readText(full).catch(() => "")).trim()
 
-    if (project.vcs === "git") {
-      let diff = await $`git diff ${file}`.cwd(Instance.directory).quiet().nothrow().text()
-      if (!diff.trim()) diff = await $`git diff --staged ${file}`.cwd(Instance.directory).quiet().nothrow().text()
+    if (project.vcs === "git" && Runtime.which("git")) {
+      let diff = await git(["diff", file], { cwd: Instance.directory }).then((x) => x.text())
+      if (!diff.trim()) diff = await git(["diff", "--staged", file], { cwd: Instance.directory }).then((x) => x.text())
       if (diff.trim()) {
-        const original = await $`git show HEAD:${file}`.cwd(Instance.directory).quiet().nothrow().text()
+        const original = await git(["show", `HEAD:${file}`], { cwd: Instance.directory }).then((x) => x.text())
         const patch = structuredPatch(file, file, original, content, "old", "new", {
           context: Infinity,
           ignoreWhitespace: true,

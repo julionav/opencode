@@ -4,8 +4,8 @@ import z from "zod"
 import { Tool } from "./tool"
 import { Skill } from "../skill"
 import { PermissionNext } from "../permission/next"
-import { Ripgrep } from "../file/ripgrep"
 import { iife } from "@/util/iife"
+import { Runtime } from "@/runtime"
 
 export const SkillTool = Tool.define("skill", async (ctx) => {
   const skills = await Skill.all()
@@ -78,22 +78,15 @@ export const SkillTool = Tool.define("skill", async (ctx) => {
 
       const limit = 10
       const files = await iife(async () => {
-        const arr = []
-        for await (const file of Ripgrep.files({
+        const matches = await Runtime.glob("**/*", {
           cwd: dir,
-          follow: false,
-          hidden: true,
-          signal: ctx.abort,
-        })) {
-          if (file.includes("SKILL.md")) {
-            continue
-          }
-          arr.push(path.resolve(dir, file))
-          if (arr.length >= limit) {
-            break
-          }
-        }
-        return arr
+          absolute: true,
+          onlyFiles: true,
+          dot: true,
+          followSymlinks: false,
+        })
+
+        return matches.filter((x) => !x.endsWith("SKILL.md")).slice(0, limit)
       }).then((f) => f.map((file) => `<file>${file}</file>`).join("\n"))
 
       return {

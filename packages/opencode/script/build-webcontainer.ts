@@ -57,6 +57,7 @@ const proc = Bun.spawn(
     "build",
     "--target=node",
     "--format=esm",
+    "--splitting",
     "--sourcemap=inline",
     "--outdir",
     out,
