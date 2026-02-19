@@ -15,6 +15,11 @@ import * as schema from "./schema"
 import { Runtime } from "@/runtime"
 import type { Database as SqlJsClient } from "sql.js"
 import type { Database as BunClient } from "bun:sqlite"
+import initSqlJs from "sql.js"
+// CJS module, but Bun/Node interop provides `.default`
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import initSqlJsAsmMod from "sql.js/dist/sql-asm.js"
 
 declare const OPENCODE_MIGRATIONS: { sql: string; timestamp: number }[] | undefined
 declare const OPENCODE_SQLJS_WASM: string | undefined
@@ -34,7 +39,6 @@ const bunSqlite = bun ? await Runtime.load<any>("bun:sqlite") : undefined
 const bunDriver = bun ? await Runtime.load<any>("drizzle-orm/bun-sqlite") : undefined
 const bunMigrator = bun ? await Runtime.load<any>("drizzle-orm/bun-sqlite/migrator") : undefined
 
-const sqljsInit = bun ? undefined : (await import("sql.js")).default
 const sqlDriver = bun ? undefined : await import("drizzle-orm/sql-js")
 
 const wasm =
@@ -48,8 +52,11 @@ const wasm =
         })()
       : undefined
 
-const SQL = sqljsInit
-  ? await sqljsInit(
+const initAsm = (initSqlJsAsmMod as any)?.default ?? initSqlJsAsmMod
+
+const SQL = bun
+  ? undefined
+  : await initSqlJs(
       wasm
         ? {
             locateFile() {
@@ -57,8 +64,11 @@ const SQL = sqljsInit
             },
           }
         : {},
-    )
-  : undefined
+    ).catch(async () => {
+      // Some WebContainer/browser combinations reject the wasm build.
+      // Fall back to the asm.js build (slower, but more compatible).
+      return initAsm({})
+    })
 
 export namespace Database {
   let sql: SqlJsClient | undefined
