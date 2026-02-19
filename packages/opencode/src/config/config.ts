@@ -18,7 +18,7 @@ import {
   modify,
   parse as parseJsonc,
   printParseErrorCode,
-} from "jsonc-parser"
+} from "jsonc-parser/lib/esm/main.js"
 import { Instance } from "../project/instance"
 import { Installation } from "@/installation"
 import { ConfigMarkdown } from "./markdown"
