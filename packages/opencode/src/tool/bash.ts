@@ -16,6 +16,7 @@ import { Runtime } from "@/runtime"
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
 import { Plugin } from "@/plugin"
+import { WebContainerShell } from "@/webcontainer/shell"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -164,6 +165,47 @@ export const BashTool = Tool.define("bash", async () => {
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
+
+      if (Runtime.mode() === "webcontainer") {
+        ctx.metadata({
+          metadata: {
+            output: "",
+            description: params.description,
+          },
+        })
+
+        const result = await WebContainerShell.exec({
+          cwd,
+          command: params.command,
+          timeout,
+          abort: ctx.abort,
+        })
+
+        ctx.metadata({
+          metadata: {
+            output:
+              result.output.length > MAX_METADATA_LENGTH
+                ? result.output.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+                : result.output,
+            exit: result.exitCode,
+            description: params.description,
+          },
+        })
+
+        return {
+          title: params.description,
+          metadata: {
+            output:
+              result.output.length > MAX_METADATA_LENGTH
+                ? result.output.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+                : result.output,
+            exit: result.exitCode,
+            description: params.description,
+          },
+          output: result.output,
+        }
+      }
+
       const proc = spawn(params.command, {
         shell,
         cwd,
