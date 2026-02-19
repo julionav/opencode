@@ -20,6 +20,7 @@ import initSqlJs from "sql.js"
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import initSqlJsAsmMod from "sql.js/dist/sql-asm.js"
+import initSqlJsWasmMod from "sql.js/dist/sql-wasm.js"
 
 declare const OPENCODE_MIGRATIONS: { sql: string; timestamp: number }[] | undefined
 declare const OPENCODE_SQLJS_WASM: string | undefined
@@ -54,21 +55,24 @@ const wasm =
 
 const initAsm = (initSqlJsAsmMod as any)?.default ?? initSqlJsAsmMod
 
+const initWasm = (initSqlJsWasmMod as any)?.default ?? initSqlJsWasmMod
+
 const SQL = bun
   ? undefined
-  : await initSqlJs(
-      wasm
-        ? {
-            locateFile() {
-              return wasm
-            },
-          }
-        : {},
-    ).catch(async () => {
-      // Some WebContainer/browser combinations reject the wasm build.
-      // Fall back to the asm.js build (slower, but more compatible).
-      return initAsm({})
-    })
+  : Runtime.mode() === "webcontainer"
+    ? await initAsm({})
+    : await initWasm(
+        wasm
+          ? {
+              locateFile() {
+                return wasm
+              },
+            }
+          : {},
+      ).catch(async () => {
+        // If the wasm build fails, fall back to the asm.js build.
+        return initAsm({})
+      })
 
 export namespace Database {
   let sql: SqlJsClient | undefined
