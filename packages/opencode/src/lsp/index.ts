@@ -103,7 +103,7 @@ export namespace LSP {
         }
       }
 
-      const { LSPServer } = await import("./server")
+      const { LSPServer } = await Runtime.load<typeof import("./server")>("./server")
       for (const server of Object.values(LSPServer)) {
         servers[server.id] = server
       }
