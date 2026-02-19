@@ -15,8 +15,9 @@ export namespace Runtime {
   export type Mode = "bun" | "node" | "webcontainer"
 
   export function mode(): Mode {
+    const forced = process.env.OPENCODE_RUNTIME
+    if (forced === "bun" || forced === "node" || forced === "webcontainer") return forced
     if (typeof process.versions.bun === "string") return "bun"
-    if (process.env.OPENCODE_RUNTIME === "webcontainer") return "webcontainer"
     return "node"
   }
 

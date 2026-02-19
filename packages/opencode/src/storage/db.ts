@@ -41,7 +41,11 @@ const wasm =
   typeof OPENCODE_SQLJS_WASM === "string"
     ? OPENCODE_SQLJS_WASM
     : Runtime.mode() === "webcontainer"
-      ? new URL("sql-wasm.wasm", import.meta.url).pathname
+      ? (() => {
+          const p = new URL("sql-wasm.wasm", import.meta.url).pathname
+          if (existsSync(p)) return p
+          return
+        })()
       : undefined
 
 const SQL = sqljsInit
