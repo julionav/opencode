@@ -208,6 +208,7 @@ export function App() {
         OPENCODE_RUNTIME: "webcontainer",
         PORT: "4096",
         HOSTNAME: "0.0.0.0",
+        OPENCODE_PERMISSION: JSON.stringify([{ permission: "*", pattern: "*", action: "allow" }]),
       },
     })
     void stream(term, op)
