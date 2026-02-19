@@ -111,3 +111,33 @@ const table = sqliteTable("session", {
 - Avoid mocks as much as possible
 - Test actual implementation, do not duplicate logic into tests
 - Tests cannot run from repo root (guard: `do-not-run-tests-from-root`); run from package dirs like `packages/opencode`.
+
+## Cloud-specific instructions
+
+### Services overview
+
+| Service | Start command | Port | Notes |
+|---------|--------------|------|-------|
+| Backend API | `bun run --conditions=browser ./src/index.ts serve --port 4096` (from `packages/opencode`) | 4096 | Headless API server; uses embedded SQLite — no external DB needed |
+| Web UI | `bun dev -- --port 4444` (from `packages/app`) | 4444 | Vite dev server; proxies API calls to `localhost:4096` |
+
+### Running services
+
+- Start the backend **before** the web UI — the frontend connects to `localhost:4096`.
+- On first backend start, an automatic SQLite migration runs; subsequent starts are instant.
+- Without `OPENCODE_SERVER_PASSWORD` the server runs unsecured (fine for local dev).
+- AI chat requires at least one LLM provider API key (e.g. `ANTHROPIC_API_KEY`). The UI and API are fully functional without one — only message generation fails.
+
+### Lint / typecheck / test
+
+- Typecheck all packages: `bun typecheck` (runs `turbo typecheck`).
+- Format check: `bun prettier --check "packages/opencode/src/**/*.ts"`.
+- Unit tests: `cd packages/opencode && bun test` (1107 tests).
+- App unit tests: `cd packages/app && bun test`.
+- Pre-push hook (`bun typecheck`) validates Bun version matches `package.json#packageManager`.
+
+### Gotchas
+
+- `bun dev` (from repo root) starts the **TUI** which requires a real terminal — use `bun run --conditions=browser ./src/index.ts serve` for headless/API mode in cloud environments.
+- The `packages/app` AGENTS.md notes: **never restart the backend server**; it handles hot-reload itself.
+- See `packages/app/AGENTS.md` and `packages/opencode/AGENTS.md` for package-specific guidance.
