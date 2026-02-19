@@ -60,7 +60,10 @@ const initWasm = (initSqlJsWasmMod as any)?.default ?? initSqlJsWasmMod
 const SQL = bun
   ? undefined
   : Runtime.mode() === "webcontainer"
-    ? await initAsm({})
+    ? await initAsm({}).then((x: any) => {
+        log.info("sql.js initialized", { runtime: Runtime.mode(), backend: "asm" })
+        return x
+      })
     : await initWasm(
         wasm
           ? {
@@ -71,7 +74,13 @@ const SQL = bun
           : {},
       ).catch(async () => {
         // If the wasm build fails, fall back to the asm.js build.
-        return initAsm({})
+        const x = await initAsm({})
+        log.info("sql.js initialized", { runtime: Runtime.mode(), backend: "asm-fallback" })
+        return x
+      })
+      .then((x: any) => {
+        log.info("sql.js initialized", { runtime: Runtime.mode(), backend: "wasm" })
+        return x
       })
 
 export namespace Database {
