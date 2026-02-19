@@ -127,8 +127,26 @@ export namespace Database {
       mode: typeof OPENCODE_MIGRATIONS !== "undefined" ? "bundled" : "dev",
     })
 
+    // If this is an existing SQLite database (created by the Bun runtime path)
+    // it may already contain the full schema but not our `__opencode_migrations` tracking table.
+    // In that case, attempting to re-run migrations will fail on `CREATE TABLE ...`.
+    if (max === 0) {
+      const existing = sqlite.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='project'")[0]
+      if (existing?.values?.length) {
+        sqlite.run("INSERT OR REPLACE INTO __opencode_migrations (timestamp) VALUES (?)", [
+          entries[entries.length - 1]!.timestamp,
+        ])
+        return
+      }
+    }
+
     for (const entry of next) {
-      sqlite.exec(entry.sql)
+      try {
+        sqlite.exec(entry.sql)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        if (!msg.includes("already exists")) throw e
+      }
       sqlite.run("INSERT INTO __opencode_migrations (timestamp) VALUES (?)", [entry.timestamp])
     }
   }
