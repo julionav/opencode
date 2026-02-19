@@ -1,12 +1,14 @@
 import z from "zod"
 import { Tool } from "./tool"
 import { Filesystem } from "../util/filesystem"
-import { Ripgrep } from "../file/ripgrep"
 
 import DESCRIPTION from "./grep.txt"
 import { Instance } from "../project/instance"
 import path from "path"
 import { assertExternalDirectory } from "./external-directory"
+import fs from "node:fs/promises"
+import { FileIgnore } from "@/file/ignore"
+import { Runtime } from "@/runtime"
 
 const MAX_LINE_LENGTH = 2000
 
@@ -37,62 +39,55 @@ export const GrepTool = Tool.define("grep", {
     searchPath = path.isAbsolute(searchPath) ? searchPath : path.resolve(Instance.directory, searchPath)
     await assertExternalDirectory(ctx, searchPath, { kind: "directory" })
 
-    const rgPath = await Ripgrep.filepath()
-    const args = ["-nH", "--hidden", "--no-messages", "--field-match-separator=|", "--regexp", params.pattern]
-    if (params.include) {
-      args.push("--glob", params.include)
-    }
-    args.push(searchPath)
+    const regex = (() => {
+      try {
+        return new RegExp(params.pattern)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        throw new Error(`Invalid regex pattern: ${params.pattern}\n${msg}`)
+      }
+    })()
 
-    const proc = Bun.spawn([rgPath, ...args], {
-      stdout: "pipe",
-      stderr: "pipe",
-      signal: ctx.abort,
+    const includes = params.include ? [params.include] : ["**/*"]
+    const files = await Runtime.glob(includes, {
+      cwd: searchPath,
+      absolute: true,
+      onlyFiles: true,
+      dot: true,
+      followSymlinks: true,
     })
 
-    const output = await new Response(proc.stdout).text()
-    const errorOutput = await new Response(proc.stderr).text()
-    const exitCode = await proc.exited
+    const matches: { path: string; modTime: number; lineNum: number; lineText: string }[] = []
+    let hasErrors = false
 
-    // Exit codes: 0 = matches found, 1 = no matches, 2 = errors (but may still have matches)
-    // With --no-messages, we suppress error output but still get exit code 2 for broken symlinks etc.
-    // Only fail if exit code is 2 AND no output was produced
-    if (exitCode === 1 || (exitCode === 2 && !output.trim())) {
-      return {
-        title: params.pattern,
-        metadata: { matches: 0, truncated: false },
-        output: "No files found",
-      }
-    }
+    for (const filePath of files) {
+      ctx.abort.throwIfAborted()
 
-    if (exitCode !== 0 && exitCode !== 2) {
-      throw new Error(`ripgrep failed: ${errorOutput}`)
-    }
+      const rel = path.relative(searchPath, filePath)
+      if (FileIgnore.match(rel)) continue
 
-    const hasErrors = exitCode === 2
+      const stat = Filesystem.stat(filePath)
+      if (!stat?.isFile()) continue
+      if (stat.size > 1024 * 1024) continue
 
-    // Handle both Unix (\n) and Windows (\r\n) line endings
-    const lines = output.trim().split(/\r?\n/)
-    const matches = []
-
-    for (const line of lines) {
-      if (!line) continue
-
-      const [filePath, lineNumStr, ...lineTextParts] = line.split("|")
-      if (!filePath || !lineNumStr || lineTextParts.length === 0) continue
-
-      const lineNum = parseInt(lineNumStr, 10)
-      const lineText = lineTextParts.join("|")
-
-      const stats = Filesystem.stat(filePath)
-      if (!stats) continue
-
-      matches.push({
-        path: filePath,
-        modTime: stats.mtime.getTime(),
-        lineNum,
-        lineText,
+      const content = await fs.readFile(filePath, "utf-8").catch(() => {
+        hasErrors = true
+        return ""
       })
+      if (!content) continue
+      if (content.includes("\u0000")) continue
+
+      const lines = content.split(/\r?\n/)
+      for (let i = 0; i < lines.length; i++) {
+        const lineText = lines[i] ?? ""
+        if (!regex.test(lineText)) continue
+        matches.push({
+          path: filePath,
+          modTime: stat.mtime.getTime(),
+          lineNum: i + 1,
+          lineText,
+        })
+      }
     }
 
     matches.sort((a, b) => b.modTime - a.modTime)
