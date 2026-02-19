@@ -3,25 +3,35 @@ import { Config } from "../config/config"
 import { Bus } from "../bus"
 import { Log } from "../util/log"
 import { createOpencodeClient } from "@opencode-ai/sdk"
-import { Server } from "../server/server"
-import { BunProc } from "../bun"
 import { Instance } from "../project/instance"
 import { Flag } from "../flag/flag"
-import { CodexAuthPlugin } from "./codex"
 import { Session } from "../session"
 import { NamedError } from "@opencode-ai/util/error"
-import { CopilotAuthPlugin } from "./copilot"
-import { gitlabAuthPlugin as GitlabAuthPlugin } from "@gitlab/opencode-gitlab-auth"
+import { Runtime } from "@/runtime"
 
 export namespace Plugin {
   const log = Log.create({ service: "plugin" })
 
   const BUILTIN = ["opencode-anthropic-auth@0.0.13"]
 
-  // Built-in plugins that are directly imported (not installed from npm)
-  const INTERNAL_PLUGINS: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin]
-
   const state = Instance.state(async () => {
+    // WebContainer/Node builds do not support Bun plugin runtime:
+    // - Bun.$ is used as the plugin shell API
+    // - BunProc installs plugins dynamically
+    // - Some internal plugins use Bun-specific servers
+    if (Runtime.mode() !== "bun") {
+      return { hooks: [] as Hooks[] }
+    }
+
+    const { Server } = await import("../server/server")
+    const { BunProc } = await import("../bun")
+    const { CodexAuthPlugin } = await import("./codex")
+    const { CopilotAuthPlugin } = await import("./copilot")
+    const { gitlabAuthPlugin: GitlabAuthPlugin } = await import("@gitlab/opencode-gitlab-auth")
+
+    // Built-in plugins that are directly imported (not installed from npm)
+    const internal: PluginInstance[] = [CodexAuthPlugin, CopilotAuthPlugin, GitlabAuthPlugin]
+
     const client = createOpencodeClient({
       baseUrl: "http://localhost:4096",
       directory: Instance.directory,
@@ -39,7 +49,7 @@ export namespace Plugin {
       $: Bun.$,
     }
 
-    for (const plugin of INTERNAL_PLUGINS) {
+    for (const plugin of internal) {
       log.info("loading internal plugin", { name: plugin.name })
       const init = await plugin(input)
       hooks.push(init)
@@ -92,10 +102,7 @@ export namespace Plugin {
       }
     }
 
-    return {
-      hooks,
-      input,
-    }
+    return { hooks }
   })
 
   export async function trigger<

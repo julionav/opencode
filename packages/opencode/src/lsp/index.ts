@@ -4,12 +4,13 @@ import { Log } from "../util/log"
 import { LSPClient } from "./client"
 import path from "path"
 import { pathToFileURL, fileURLToPath } from "url"
-import { LSPServer } from "./server"
+import type { LSPServer } from "./server"
 import z from "zod"
 import { Config } from "../config/config"
 import { spawn } from "child_process"
 import { Instance } from "../project/instance"
 import { Flag } from "@/flag/flag"
+import { Runtime } from "@/runtime"
 
 export namespace LSP {
   const log = Log.create({ service: "lsp" })
@@ -82,6 +83,16 @@ export namespace LSP {
       const servers: Record<string, LSPServer.Info> = {}
       const cfg = await Config.get()
 
+      if (Runtime.mode() === "webcontainer") {
+        log.info("LSP disabled in webcontainer mode")
+        return {
+          broken: new Set<string>(),
+          servers,
+          clients,
+          spawning: new Map<string, Promise<LSPClient.Info | undefined>>(),
+        }
+      }
+
       if (cfg.lsp === false) {
         log.info("all LSPs are disabled")
         return {
@@ -92,6 +103,7 @@ export namespace LSP {
         }
       }
 
+      const { LSPServer } = await import("./server")
       for (const server of Object.values(LSPServer)) {
         servers[server.id] = server
       }

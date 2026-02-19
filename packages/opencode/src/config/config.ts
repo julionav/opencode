@@ -20,18 +20,16 @@ import {
   printParseErrorCode,
 } from "jsonc-parser"
 import { Instance } from "../project/instance"
-import { LSPServer } from "../lsp/server"
-import { BunProc } from "@/bun"
 import { Installation } from "@/installation"
 import { ConfigMarkdown } from "./markdown"
 import { constants, existsSync } from "fs"
 import { Bus } from "@/bus"
 import { GlobalBus } from "@/bus/global"
 import { Event } from "../server/event"
-import { PackageRegistry } from "@/bun/registry"
 import { proxied } from "@/util/proxied"
 import { iife } from "@/util/iife"
 import { Control } from "@/control"
+import { Runtime } from "@/runtime"
 
 export namespace Config {
   const ModelId = z.string().meta({ $ref: "https://models.dev/model-schema.json#/$defs/Model" })
@@ -264,6 +262,7 @@ export namespace Config {
   }
 
   export async function installDependencies(dir: string) {
+    if (Runtime.mode() !== "bun") return
     const pkg = path.join(dir, "package.json")
     const targetVersion = Installation.isLocal() ? "*" : Installation.VERSION
 
@@ -284,6 +283,7 @@ export namespace Config {
 
     // Install any additional dependencies defined in the package.json
     // This allows local plugins and custom tools to use external packages
+    const { BunProc } = await import("@/bun")
     await BunProc.run(
       [
         "install",
@@ -304,6 +304,7 @@ export namespace Config {
   }
 
   async function needsInstall(dir: string) {
+    if (Runtime.mode() !== "bun") return false
     // Some config dirs may be read-only.
     // Installing deps there will fail; skip installation in that case.
     const writable = await isWritable(dir)
@@ -326,6 +327,7 @@ export namespace Config {
 
     const targetVersion = Installation.isLocal() ? "latest" : Installation.VERSION
     if (targetVersion === "latest") {
+      const { PackageRegistry } = await import("@/bun/registry")
       const isOutdated = await PackageRegistry.isOutdated("@opencode-ai/plugin", depVersion, dir)
       if (!isOutdated) return false
       log.info("Cached version is outdated, proceeding with install", {
@@ -351,15 +353,17 @@ export namespace Config {
     return ext.length ? file.slice(0, -ext.length) : file
   }
 
-  const COMMAND_GLOB = new Bun.Glob("{command,commands}/**/*.md")
+  const COMMAND_GLOB = "{command,commands}/**/*.md"
   async function loadCommand(dir: string) {
     const result: Record<string, Command> = {}
-    for await (const item of COMMAND_GLOB.scan({
+    const items = await Runtime.glob(COMMAND_GLOB, {
+      cwd: dir,
       absolute: true,
+      onlyFiles: true,
       followSymlinks: true,
       dot: true,
-      cwd: dir,
-    })) {
+    })
+    for (const item of items) {
       const md = await ConfigMarkdown.parse(item).catch(async (err) => {
         const message = ConfigMarkdown.FrontmatterError.isInstance(err)
           ? err.data.message
@@ -390,16 +394,18 @@ export namespace Config {
     return result
   }
 
-  const AGENT_GLOB = new Bun.Glob("{agent,agents}/**/*.md")
+  const AGENT_GLOB = "{agent,agents}/**/*.md"
   async function loadAgent(dir: string) {
     const result: Record<string, Agent> = {}
 
-    for await (const item of AGENT_GLOB.scan({
+    const items = await Runtime.glob(AGENT_GLOB, {
+      cwd: dir,
       absolute: true,
+      onlyFiles: true,
       followSymlinks: true,
       dot: true,
-      cwd: dir,
-    })) {
+    })
+    for (const item of items) {
       const md = await ConfigMarkdown.parse(item).catch(async (err) => {
         const message = ConfigMarkdown.FrontmatterError.isInstance(err)
           ? err.data.message
@@ -430,15 +436,17 @@ export namespace Config {
     return result
   }
 
-  const MODE_GLOB = new Bun.Glob("{mode,modes}/*.md")
+  const MODE_GLOB = "{mode,modes}/*.md"
   async function loadMode(dir: string) {
     const result: Record<string, Agent> = {}
-    for await (const item of MODE_GLOB.scan({
+    const items = await Runtime.glob(MODE_GLOB, {
+      cwd: dir,
       absolute: true,
+      onlyFiles: true,
       followSymlinks: true,
       dot: true,
-      cwd: dir,
-    })) {
+    })
+    for (const item of items) {
       const md = await ConfigMarkdown.parse(item).catch(async (err) => {
         const message = ConfigMarkdown.FrontmatterError.isInstance(err)
           ? err.data.message
@@ -467,16 +475,18 @@ export namespace Config {
     return result
   }
 
-  const PLUGIN_GLOB = new Bun.Glob("{plugin,plugins}/*.{ts,js}")
+  const PLUGIN_GLOB = "{plugin,plugins}/*.{ts,js}"
   async function loadPlugin(dir: string) {
     const plugins: string[] = []
 
-    for await (const item of PLUGIN_GLOB.scan({
+    const items = await Runtime.glob(PLUGIN_GLOB, {
+      cwd: dir,
       absolute: true,
+      onlyFiles: true,
       followSymlinks: true,
       dot: true,
-      cwd: dir,
-    })) {
+    })
+    for (const item of items) {
       plugins.push(pathToFileURL(item).href)
     }
     return plugins
@@ -1145,23 +1155,7 @@ export namespace Config {
             ]),
           ),
         ])
-        .optional()
-        .refine(
-          (data) => {
-            if (!data) return true
-            if (typeof data === "boolean") return true
-            const serverIds = new Set(Object.values(LSPServer).map((s) => s.id))
-
-            return Object.entries(data).every(([id, config]) => {
-              if (config.disabled) return true
-              if (serverIds.has(id)) return true
-              return Boolean(config.extensions)
-            })
-          },
-          {
-            error: "For custom LSP servers, 'extensions' array is required.",
-          },
-        ),
+        .optional(),
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: Permission.optional(),
@@ -1276,8 +1270,7 @@ export namespace Config {
         }
         const resolvedPath = path.isAbsolute(filePath) ? filePath : path.resolve(configDir, filePath)
         const fileContent = (
-          await Bun.file(resolvedPath)
-            .text()
+          await fs.readFile(resolvedPath, "utf-8")
             .catch((error) => {
               const errMsg = `bad file reference: "${match}"`
               if (error.code === "ENOENT") {
@@ -1325,7 +1318,7 @@ export namespace Config {
       if (!parsed.data.$schema && isFile) {
         parsed.data.$schema = "https://opencode.ai/config.json"
         const updated = original.replace(/^\s*\{/, '{\n  "$schema": "https://opencode.ai/config.json",')
-        await Bun.write(options.path, updated).catch(() => {})
+        await fs.writeFile(options.path, updated).catch(() => {})
       }
       const data = parsed.data
       if (data.plugin && isFile) {

@@ -1,11 +1,13 @@
 import { BusEvent } from "@/bus/bus-event"
 import path from "path"
-import { $ } from "bun"
 import z from "zod"
 import { NamedError } from "@opencode-ai/util/error"
 import { Log } from "../util/log"
 import { iife } from "@/util/iife"
 import { Flag } from "../flag/flag"
+import { Runtime } from "@/runtime"
+
+const shell = Runtime.mode() === "bun" ? (await import("bun")).$ : undefined
 
 declare global {
   const OPENCODE_VERSION: string
@@ -58,6 +60,7 @@ export namespace Installation {
   }
 
   export async function method() {
+    if (!shell) return "unknown"
     if (process.execPath.includes(path.join(".opencode", "bin"))) return "curl"
     if (process.execPath.includes(path.join(".local", "bin"))) return "curl"
     const exec = process.execPath.toLowerCase()
@@ -65,31 +68,31 @@ export namespace Installation {
     const checks = [
       {
         name: "npm" as const,
-        command: () => $`npm list -g --depth=0`.throws(false).quiet().text(),
+        command: () => shell`npm list -g --depth=0`.throws(false).quiet().text(),
       },
       {
         name: "yarn" as const,
-        command: () => $`yarn global list`.throws(false).quiet().text(),
+        command: () => shell`yarn global list`.throws(false).quiet().text(),
       },
       {
         name: "pnpm" as const,
-        command: () => $`pnpm list -g --depth=0`.throws(false).quiet().text(),
+        command: () => shell`pnpm list -g --depth=0`.throws(false).quiet().text(),
       },
       {
         name: "bun" as const,
-        command: () => $`bun pm ls -g`.throws(false).quiet().text(),
+        command: () => shell`bun pm ls -g`.throws(false).quiet().text(),
       },
       {
         name: "brew" as const,
-        command: () => $`brew list --formula opencode`.throws(false).quiet().text(),
+        command: () => shell`brew list --formula opencode`.throws(false).quiet().text(),
       },
       {
         name: "scoop" as const,
-        command: () => $`scoop list opencode`.throws(false).quiet().text(),
+        command: () => shell`scoop list opencode`.throws(false).quiet().text(),
       },
       {
         name: "choco" as const,
-        command: () => $`choco list --limit-output opencode`.throws(false).quiet().text(),
+        command: () => shell`choco list --limit-output opencode`.throws(false).quiet().text(),
       },
     ]
 
@@ -121,36 +124,38 @@ export namespace Installation {
   )
 
   async function getBrewFormula() {
-    const tapFormula = await $`brew list --formula anomalyco/tap/opencode`.throws(false).quiet().text()
+    if (!shell) return "opencode"
+    const tapFormula = await shell`brew list --formula anomalyco/tap/opencode`.throws(false).quiet().text()
     if (tapFormula.includes("opencode")) return "anomalyco/tap/opencode"
-    const coreFormula = await $`brew list --formula opencode`.throws(false).quiet().text()
+    const coreFormula = await shell`brew list --formula opencode`.throws(false).quiet().text()
     if (coreFormula.includes("opencode")) return "opencode"
     return "opencode"
   }
 
   export async function upgrade(method: Method, target: string) {
+    if (!shell) throw new Error("Upgrade is not supported in this runtime")
     let cmd
     switch (method) {
       case "curl":
-        cmd = $`curl -fsSL https://opencode.ai/install | bash`.env({
+        cmd = shell`curl -fsSL https://opencode.ai/install | bash`.env({
           ...process.env,
           VERSION: target,
         })
         break
       case "npm":
-        cmd = $`npm install -g opencode-ai@${target}`
+        cmd = shell`npm install -g opencode-ai@${target}`
         break
       case "pnpm":
-        cmd = $`pnpm install -g opencode-ai@${target}`
+        cmd = shell`pnpm install -g opencode-ai@${target}`
         break
       case "bun":
-        cmd = $`bun install -g opencode-ai@${target}`
+        cmd = shell`bun install -g opencode-ai@${target}`
         break
       case "brew": {
         const formula = await getBrewFormula()
         if (formula.includes("/")) {
           cmd =
-            $`brew tap anomalyco/tap && cd "$(brew --repo anomalyco/tap)" && git pull --ff-only && brew upgrade ${formula}`.env(
+            shell`brew tap anomalyco/tap && cd "$(brew --repo anomalyco/tap)" && git pull --ff-only && brew upgrade ${formula}`.env(
               {
                 HOMEBREW_NO_AUTO_UPDATE: "1",
                 ...process.env,
@@ -158,17 +163,17 @@ export namespace Installation {
             )
           break
         }
-        cmd = $`brew upgrade ${formula}`.env({
+        cmd = shell`brew upgrade ${formula}`.env({
           HOMEBREW_NO_AUTO_UPDATE: "1",
           ...process.env,
         })
         break
       }
       case "choco":
-        cmd = $`echo Y | choco upgrade opencode --version=${target}`
+        cmd = shell`echo Y | choco upgrade opencode --version=${target}`
         break
       case "scoop":
-        cmd = $`scoop install opencode@${target}`
+        cmd = shell`scoop install opencode@${target}`
         break
       default:
         throw new Error(`Unknown method: ${method}`)
@@ -186,7 +191,7 @@ export namespace Installation {
       stdout: result.stdout.toString(),
       stderr: result.stderr.toString(),
     })
-    await $`${process.execPath} --version`.nothrow().quiet().text()
+    await shell`${process.execPath} --version`.nothrow().quiet().text()
   }
 
   export const VERSION = typeof OPENCODE_VERSION === "string" ? OPENCODE_VERSION : "local"
@@ -194,12 +199,13 @@ export namespace Installation {
   export const USER_AGENT = `opencode/${CHANNEL}/${VERSION}/${Flag.OPENCODE_CLIENT}`
 
   export async function latest(installMethod?: Method) {
+    if (!shell) return VERSION
     const detectedMethod = installMethod || (await method())
 
     if (detectedMethod === "brew") {
       const formula = await getBrewFormula()
       if (formula.includes("/")) {
-        const infoJson = await $`brew info --json=v2 ${formula}`.quiet().text()
+        const infoJson = await shell`brew info --json=v2 ${formula}`.quiet().text()
         const info = JSON.parse(infoJson)
         const version = info.formulae?.[0]?.versions?.stable
         if (!version) throw new Error(`Could not detect version for tap formula: ${formula}`)
@@ -215,7 +221,7 @@ export namespace Installation {
 
     if (detectedMethod === "npm" || detectedMethod === "bun" || detectedMethod === "pnpm") {
       const registry = await iife(async () => {
-        const r = (await $`npm config get registry`.quiet().nothrow().text()).trim()
+        const r = (await shell`npm config get registry`.quiet().nothrow().text()).trim()
         const reg = r || "https://registry.npmjs.org"
         return reg.endsWith("/") ? reg.slice(0, -1) : reg
       })
