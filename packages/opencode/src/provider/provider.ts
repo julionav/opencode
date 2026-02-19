@@ -5,7 +5,6 @@ import { Config } from "../config/config"
 import { mapValues, mergeDeep, omit, pickBy, sortBy } from "remeda"
 import { NoSuchModelError, type Provider as SDK } from "ai"
 import { Log } from "../util/log"
-import { BunProc } from "../bun"
 import { Plugin } from "../plugin"
 import { ModelsDev } from "./models"
 import { NamedError } from "@opencode-ai/util/error"
@@ -17,6 +16,8 @@ import { iife } from "@/util/iife"
 import { Global } from "../global"
 import path from "path"
 import { Filesystem } from "../util/filesystem"
+import { Runtime } from "@/runtime"
+import { createHash } from "node:crypto"
 
 // Direct imports for bundled providers
 import { createAmazonBedrock, type AmazonBedrockProviderSettings } from "@ai-sdk/amazon-bedrock"
@@ -774,7 +775,7 @@ export namespace Provider {
     const modelLoaders: {
       [providerID: string]: CustomModelLoader
     } = {}
-    const sdk = new Map<number, SDK>()
+    const sdk = new Map<string, SDK>()
 
     log.info("init")
 
@@ -1064,7 +1065,9 @@ export namespace Provider {
           ...model.headers,
         }
 
-      const key = Bun.hash.xxHash32(JSON.stringify({ providerID: model.providerID, npm: model.api.npm, options }))
+      const key = createHash("sha256")
+        .update(JSON.stringify({ providerID: model.providerID, npm: model.api.npm, options }))
+        .digest("hex")
       const existing = s.sdk.get(key)
       if (existing) return existing
 
@@ -1123,6 +1126,12 @@ export namespace Provider {
 
       let installedPath: string
       if (!model.api.npm.startsWith("file://")) {
+        if (Runtime.mode() !== "bun") {
+          throw new Error(
+            `Provider package install is not supported in this runtime (provider=${model.providerID}, npm=${model.api.npm})`,
+          )
+        }
+        const { BunProc } = await import("../bun")
         installedPath = await BunProc.install(model.api.npm, "latest")
       } else {
         log.info("loading local provider", { pkg: model.api.npm })
