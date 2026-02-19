@@ -37,12 +37,19 @@ const bunMigrator = bun ? await import("drizzle-orm/bun-sqlite/migrator") : unde
 const sqljsInit = bun ? undefined : (await import("sql.js")).default
 const sqlDriver = bun ? undefined : await import("drizzle-orm/sql-js")
 
+const wasm =
+  typeof OPENCODE_SQLJS_WASM === "string"
+    ? OPENCODE_SQLJS_WASM
+    : Runtime.mode() === "webcontainer"
+      ? new URL("sql-wasm.wasm", import.meta.url).pathname
+      : undefined
+
 const SQL = sqljsInit
   ? await sqljsInit(
-      typeof OPENCODE_SQLJS_WASM === "string"
+      wasm
         ? {
             locateFile() {
-              return OPENCODE_SQLJS_WASM
+              return wasm
             },
           }
         : {},
@@ -94,6 +101,8 @@ export namespace Database {
   }
 
   function journal() {
+    const injected = (globalThis as unknown as { OPENCODE_MIGRATIONS?: Journal }).OPENCODE_MIGRATIONS
+    if (injected) return injected
     return typeof OPENCODE_MIGRATIONS !== "undefined"
       ? OPENCODE_MIGRATIONS
       : migrations(path.join(import.meta.dirname, "../../migration"))
