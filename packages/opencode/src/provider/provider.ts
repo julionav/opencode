@@ -1131,7 +1131,7 @@ export namespace Provider {
             `Provider package install is not supported in this runtime (provider=${model.providerID}, npm=${model.api.npm})`,
           )
         }
-        const { BunProc } = await import("../bun")
+        const { BunProc } = await Runtime.load<typeof import("../bun")>("../bun")
         installedPath = await BunProc.install(model.api.npm, "latest")
       } else {
         log.info("loading local provider", { pkg: model.api.npm })
