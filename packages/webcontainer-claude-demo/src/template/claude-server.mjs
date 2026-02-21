@@ -11,20 +11,6 @@ function write(res, event, data) {
   res.write(`data: ${JSON.stringify(data)}\n\n`)
 }
 
-function text(msg) {
-  if (!msg || typeof msg !== "object") return ""
-  if (msg.type !== "assistant") return ""
-  if (!msg.message || typeof msg.message !== "object") return ""
-  if (!Array.isArray(msg.message.content)) return ""
-  return msg.message.content
-    .flatMap((part) => {
-      if (!part || typeof part !== "object") return []
-      if (part.type !== "text" || typeof part.text !== "string") return []
-      return [part.text]
-    })
-    .join("\n")
-}
-
 async function parse(req) {
   let body = ""
   for await (const chunk of req) body += chunk
@@ -140,8 +126,6 @@ const server = http.createServer(async (req, res) => {
           sessionID = msg.session_id
         }
         write(res, "message", msg)
-        const value = text(msg)
-        if (value) write(res, "assistant", { text: value, sessionID })
       }
       write(res, "done", { sessionID })
       res.end()
