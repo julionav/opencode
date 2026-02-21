@@ -160,6 +160,21 @@ function createProxyFetch(frame: HTMLIFrameElement): ProxyFetch {
 
     return new Promise<Response>((resolve, reject) => {
       pending.set(id, { resolve, reject })
+      req.signal.addEventListener(
+        "abort",
+        () => {
+          const item = pending.get(id)
+          if (!item) return
+          pending.delete(id)
+          const error = new DOMException("The operation was aborted", "AbortError")
+          if (item.controller) {
+            item.controller.error(error)
+            return
+          }
+          item.reject(error)
+        },
+        { once: true },
+      )
       frame.contentWindow!.postMessage(
         {
           id,
@@ -375,11 +390,14 @@ export function App() {
     setPrompt("")
     setSending(true)
     push({ role: "user", text })
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 120_000)
     try {
       const url = new URL("/prompt", api)
       const res = await proxy.current.fetch(
         new Request(url.toString(), {
           method: "POST",
+          signal: controller.signal,
           headers: {
             "Content-Type": "application/json",
           },
@@ -425,8 +443,13 @@ export function App() {
         setValue(next)
       }
     } catch (error) {
-      push({ role: "error", text: error instanceof Error ? error.message : String(error) })
+      const message = error instanceof Error ? error.message : String(error)
+      push({
+        role: "error",
+        text: message === "The operation was aborted" ? "Claude request timed out after 120s." : message,
+      })
     }
+    clearTimeout(timer)
     setSending(false)
   }
 

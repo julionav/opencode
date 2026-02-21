@@ -35,3 +35,4 @@ You can also override the CORS proxy at runtime with `?cors=https://your-tunnel.
 - The first boot installs dependencies inside the WebContainer and can take a while.
 - Claude model availability depends on your Anthropic account.
 - The in-container server runs with SDK permission bypass mode for demo convenience.
+- The UI aborts stuck Claude prompt streams after 120 seconds and shows a timeout error.
