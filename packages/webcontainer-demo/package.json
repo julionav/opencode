@@ -14,7 +14,7 @@
     "@codemirror/lang-javascript": "6.2.4",
     "@opencode-ai/sdk": "workspace:*",
     "@uiw/react-codemirror": "4.25.4",
-    "@webcontainer/api": "1.6.1",
+    "@webcontainer/api": "1.6.4-internal.3",
     "codemirror": "6.0.2",
     "react": "18",
     "react-dom": "18",

@@ -15,12 +15,10 @@ import * as schema from "./schema"
 import { Runtime } from "@/runtime"
 import type { Database as SqlJsClient } from "sql.js"
 import type { Database as BunClient } from "bun:sqlite"
-import initSqlJs from "sql.js"
 // CJS module, but Bun/Node interop provides `.default`
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 import initSqlJsAsmMod from "sql.js/dist/sql-asm.js"
-import initSqlJsWasmMod from "sql.js/dist/sql-wasm.js"
 
 declare const OPENCODE_MIGRATIONS: { sql: string; timestamp: number }[] | undefined
 declare const OPENCODE_SQLJS_WASM: string | undefined
@@ -55,8 +53,6 @@ const wasm =
 
 const initAsm = (initSqlJsAsmMod as any)?.default ?? initSqlJsAsmMod
 
-const initWasm = (initSqlJsWasmMod as any)?.default ?? initSqlJsWasmMod
-
 const SQL = bun
   ? undefined
   : Runtime.mode() === "webcontainer"
@@ -64,24 +60,20 @@ const SQL = bun
         log.info("sql.js initialized", { runtime: Runtime.mode(), backend: "asm" })
         return x
       })
-    : await initWasm(
-        wasm
-          ? {
-              locateFile() {
-                return wasm
-              },
-            }
-          : {},
-      ).catch(async () => {
-        // If the wasm build fails, fall back to the asm.js build.
-        const x = await initAsm({})
-        log.info("sql.js initialized", { runtime: Runtime.mode(), backend: "asm-fallback" })
-        return x
-      })
-      .then((x: any) => {
-        log.info("sql.js initialized", { runtime: Runtime.mode(), backend: "wasm" })
-        return x
-      })
+    : await (async () => {
+        const mod = await import("sql.js/dist/sql-wasm.js")
+        const initWasm = (mod as any)?.default ?? mod
+        return initWasm(wasm ? { locateFile: () => wasm } : {})
+      })()
+        .catch(async () => {
+          const x = await initAsm({})
+          log.info("sql.js initialized", { runtime: Runtime.mode(), backend: "asm-fallback" })
+          return x
+        })
+        .then((x: any) => {
+          log.info("sql.js initialized", { runtime: Runtime.mode(), backend: "wasm" })
+          return x
+        })
 
 export namespace Database {
   let sql: SqlJsClient | undefined

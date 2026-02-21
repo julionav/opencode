@@ -130,6 +130,23 @@ textarea {
   cursor: pointer;
 }
 
+.term-tabs button {
+  background: transparent;
+  border: 1px solid #1a2233;
+  color: #e6e6e6;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.term-tabs button:hover {
+  background: #1f2937;
+}
+
+.term-tabs button.active {
+  background: #1f2937;
+  border-color: #2b5cff;
+}
+
 iframe {
   width: 100%;
   height: 100%;

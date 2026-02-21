@@ -213,7 +213,12 @@ export namespace Config {
     }
 
     if (Flag.OPENCODE_PERMISSION) {
-      result.permission = mergeDeep(result.permission ?? {}, JSON.parse(Flag.OPENCODE_PERMISSION))
+      // Parse + validate permission overrides the same way as file-based config.
+      // This prevents passing a PermissionNext.Ruleset array here (which would later
+      // turn into nonsense rules like { permission: "0", action: "*" }).
+      const raw = JSON.parse(Flag.OPENCODE_PERMISSION)
+      const merged = typeof raw === "string" ? raw : mergeDeep(result.permission ?? {}, raw)
+      result.permission = Permission.parse(merged)
     }
 
     // Backwards compatibility: legacy top-level `tools` config

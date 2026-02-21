@@ -1,4 +1,4 @@
-import { AsyncLocalStorage } from "async_hooks"
+import { AsyncLocalStorage, AsyncResource } from "async_hooks"
 
 export namespace Context {
   export class NotFound extends Error {
@@ -18,7 +18,13 @@ export namespace Context {
         return result
       },
       provide<R>(value: T, fn: () => R) {
-        return storage.run(value, fn)
+        // WebContainer's Node compatibility can be flaky with async_hooks propagation
+        // across promise boundaries. Running `fn` inside an AsyncResource helps
+        // preserve the AsyncLocalStorage store for downstream awaits.
+        return storage.run(value, () => {
+          const resource = new AsyncResource(`context:${name}`)
+          return resource.runInAsyncScope(fn)
+        })
       },
     }
   }

@@ -5,7 +5,7 @@ This package is a Vite + React demo that boots a StackBlitz WebContainer and run
 - a user Vite app at `/project` (port **5173** inside the container)
 - an OpenCode backend at `/opencode` (port **4096** inside the container)
 
-The demo starts the backend with `OPENCODE_PERMISSION='[{"permission":"*","pattern":"*","action":"allow"}]'` so tool calls don’t block on interactive permission prompts.
+The demo starts the backend with `OPENCODE_PERMISSION='{"*":"allow"}'` so tool calls don’t block on interactive permission prompts.
 
 ## Run locally
 

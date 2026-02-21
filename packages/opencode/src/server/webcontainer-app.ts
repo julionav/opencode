@@ -17,10 +17,67 @@ import { SessionRoutes } from "./routes/session"
 import { GlobalRoutes } from "./routes/global"
 import { WebContainerShellRoutes } from "./routes/webcontainer-shell"
 
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, HEAD, POST, OPTIONS, DELETE, PATCH, PUT",
+  "Access-Control-Allow-Headers": "Content-Type",
+}
+
 export function createWebContainerApp() {
   const log = Log.create({ service: "webcontainer.server" })
 
   const app = new Hono()
+
+  app.use("*", async (c, next) => {
+    log.info("request", {
+      method: c.req.method,
+      path: c.req.path,
+      url: c.req.url,
+    })
+    return await next()
+  })
+
+  app.use(
+    cors({
+      origin: corsHeaders["Access-Control-Allow-Origin"],
+      allowMethods: corsHeaders["Access-Control-Allow-Methods"].split(", "),
+      allowHeaders: corsHeaders["Access-Control-Allow-Headers"].split(", "),
+    }),
+  )
+
+  app.get("/health", (c) => c.text("hey"))
+
+  app.get("/proxy", (c) => {
+    return c.html(`<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head><body><script>
+window.addEventListener("message", async (e) => {
+  const { id, method, path, headers, body } = e.data
+  if (!id || !path) return
+  try {
+    const res = await fetch(path, {
+      method: method || "GET",
+      headers: headers || {},
+      body: body != null ? body : undefined,
+    })
+    const responseHeaders = {}
+    res.headers.forEach((v, k) => { responseHeaders[k] = v })
+    window.parent.postMessage({ id, type: "start", status: res.status, headers: responseHeaders }, "*")
+    if (res.body) {
+      const reader = res.body.getReader()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        window.parent.postMessage({ id, type: "chunk", chunk: value }, "*", [value.buffer])
+      }
+    }
+    window.parent.postMessage({ id, type: "end" }, "*")
+  } catch (err) {
+    window.parent.postMessage({ id, type: "error", message: err.message }, "*")
+  }
+})
+window.parent.postMessage({ type: "ready" }, "*")
+</script></body></html>`)
+  })
 
   app.onError((err, c) => {
     log.error("failed", { error: err })
@@ -36,23 +93,17 @@ export function createWebContainerApp() {
     return c.json(new NamedError.Unknown({ message }).toObject(), { status: 500 })
   })
 
-  app.use(
-    cors({
-      origin: "*",
-    }),
-  )
-
-  app.use((c, next) => {
+  app.use(async (c, next) => {
     // Allow CORS preflight requests to succeed without auth.
-    if (c.req.method === "OPTIONS") return next()
+    if (c.req.method === "OPTIONS") return await next()
     const password = Flag.OPENCODE_SERVER_PASSWORD
-    if (!password) return next()
+    if (!password) return await next()
     const username = Flag.OPENCODE_SERVER_USERNAME ?? "opencode"
-    return basicAuth({ username, password })(c, next)
+    return await basicAuth({ username, password })(c, next)
   })
 
   app.use(async (c, next) => {
-    const raw = c.req.query("directory") || c.req.header("x-opencode-directory") || process.cwd()
+    const raw = "/home/workdir/project"
     const directory = (() => {
       try {
         return decodeURIComponent(raw)
@@ -61,13 +112,26 @@ export function createWebContainerApp() {
       }
     })()
 
-    return Instance.provide({
-      directory,
-      init: InstanceBootstrapWebcontainer,
-      async fn() {
-        return next()
-      },
-    })
+    console.log("directory!!!!", directory)
+    console.log(
+      "[dbg 3cdfc3] instance.provide begin",
+      JSON.stringify({ method: c.req.method, path: c.req.path, raw, directory }),
+    )
+    try {
+      return await Instance.provide({
+        directory,
+        init: InstanceBootstrapWebcontainer,
+        async fn() {
+          console.log("[dbg 3cdfc3] instance.fn enter", JSON.stringify({ method: c.req.method, path: c.req.path }))
+          const result = await next()
+          console.log("[dbg 3cdfc3] instance.fn exit", JSON.stringify({ method: c.req.method, path: c.req.path }))
+          return result
+        },
+      })
+    } catch (e) {
+      console.log("[dbg 3cdfc3] instance.provide error", e instanceof Error ? e.stack || e.message : String(e))
+      throw e
+    }
   })
 
   app.route("/global", GlobalRoutes())
@@ -144,4 +208,3 @@ export function createWebContainerApp() {
 
   return app
 }
-

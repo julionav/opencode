@@ -5,6 +5,7 @@ import { State } from "./state"
 import { iife } from "@/util/iife"
 import { GlobalBus } from "@/bus/global"
 import { Filesystem } from "@/util/filesystem"
+import { Runtime } from "@/runtime"
 
 interface Context {
   directory: string
@@ -13,6 +14,7 @@ interface Context {
 }
 const context = Context.create<Context>("instance")
 const cache = new Map<string, Promise<Context>>()
+const fallback = globalThis as unknown as { __OPENCODE_INSTANCE_FALLBACK?: Context }
 
 const disposal = {
   all: undefined as Promise<void> | undefined,
@@ -30,6 +32,10 @@ export const Instance = {
           worktree: sandbox,
           project,
         }
+        // WebContainer's AsyncLocalStorage propagation can be unreliable across
+        // framework middleware boundaries. Keep a best-effort fallback context
+        // (single-instance demo mode) so handlers can still resolve Instance.*.
+        if (Runtime.mode() === "webcontainer") fallback.__OPENCODE_INSTANCE_FALLBACK = ctx
         await context.provide(ctx, async () => {
           await input.init?.()
         })
@@ -38,18 +44,38 @@ export const Instance = {
       cache.set(input.directory, existing)
     }
     const ctx = await existing
+    // Important: `await` the downstream work so AsyncLocalStorage
+    // correctly propagates in runtimes with weaker async_hooks support (e.g. WebContainer).
     return context.provide(ctx, async () => {
-      return input.fn()
+      return await input.fn()
     })
   },
   get directory() {
-    return context.use().directory
+    try {
+      return context.use().directory
+    } catch (e) {
+      if (Runtime.mode() === "webcontainer" && fallback.__OPENCODE_INSTANCE_FALLBACK)
+        return fallback.__OPENCODE_INSTANCE_FALLBACK.directory
+      throw e
+    }
   },
   get worktree() {
-    return context.use().worktree
+    try {
+      return context.use().worktree
+    } catch (e) {
+      if (Runtime.mode() === "webcontainer" && fallback.__OPENCODE_INSTANCE_FALLBACK)
+        return fallback.__OPENCODE_INSTANCE_FALLBACK.worktree
+      throw e
+    }
   },
   get project() {
-    return context.use().project
+    try {
+      return context.use().project
+    } catch (e) {
+      if (Runtime.mode() === "webcontainer" && fallback.__OPENCODE_INSTANCE_FALLBACK)
+        return fallback.__OPENCODE_INSTANCE_FALLBACK.project
+      throw e
+    }
   },
   /**
    * Check if a path is within the project boundary.

@@ -119,9 +119,14 @@ export namespace Provider {
 
   const CUSTOM_LOADERS: Record<string, CustomLoader> = {
     async anthropic() {
+      const baseURL = Env.get("OPENCODE_ANTHROPIC_BASE_URL")
+      if (baseURL) {
+        console.log("[dbg 3cdfc3] anthropic baseURL override", JSON.stringify({ baseURL }))
+      }
       return {
         autoload: false,
         options: {
+          ...(baseURL ? { baseURL } : {}),
           headers: {
             "anthropic-beta":
               "claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",

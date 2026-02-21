@@ -512,7 +512,7 @@
         "@codemirror/lang-javascript": "6.2.4",
         "@opencode-ai/sdk": "workspace:*",
         "@uiw/react-codemirror": "4.25.4",
-        "@webcontainer/api": "1.6.1",
+        "@webcontainer/api": "1.6.4-internal.3",
         "codemirror": "6.0.2",
         "react": "18",
         "react-dom": "18",
@@ -2104,7 +2104,7 @@
 
     "@vscode/l10n": ["@vscode/l10n@0.0.18", "", {}, "sha512-KYSIHVmslkaCDyw013pphY+d7x1qV8IZupYfeIfzNA+nsaWHbn5uPuQRvdRFsa9zFzGeudPuoGoZ1Op4jrJXIQ=="],
 
-    "@webcontainer/api": ["@webcontainer/api@1.6.1", "", {}, "sha512-2RS2KiIw32BY1Icf6M1DvqSmcon9XICZCDgS29QJb2NmF12ZY2V5Ia+949hMKB3Wno+P/Y8W+sPP59PZeXSELg=="],
+    "@webcontainer/api": ["@webcontainer/api@1.6.4-internal.3", "", {}, "sha512-1M/1RpyT3/3ytrokZdVEBVVr+hODeB5NSOCi/dFkY5dr6JttgCt3yIAQFPFfVpyQqHhwpGs7fcc2bTouWHm1+g=="],
 
     "@webgpu/types": ["@webgpu/types@0.1.54", "", {}, "sha512-81oaalC8LFrXjhsczomEQ0u3jG+TqE6V9QHLA8GNZq/Rnot0KDugu3LhSYSlie8tSdooAN1Hov05asrUUp9qgg=="],
 

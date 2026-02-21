@@ -16,6 +16,7 @@ import { Log } from "../../util/log"
 import { PermissionNext } from "@/permission/next"
 import { errors } from "../error"
 import { lazy } from "../../util/lazy"
+import { Instance } from "@/project/instance"
 
 const log = Log.create({ service: "server" })
 
@@ -202,6 +203,27 @@ export const SessionRoutes = lazy(() =>
       }),
       validator("json", Session.create.schema.optional()),
       async (c) => {
+        console.log(
+          "[dbg 3cdfc3] session.create handler enter",
+          JSON.stringify({
+            method: c.req.method,
+            path: c.req.path,
+            headerDirectory: c.req.header("x-opencode-directory") ?? undefined,
+            queryDirectory: c.req.query("directory") ?? undefined,
+          }),
+        )
+        try {
+          console.log(
+            "[dbg 3cdfc3] session.create instance ok",
+            JSON.stringify({ directory: Instance.directory, projectID: Instance.project.id }),
+          )
+        } catch (e) {
+          console.log(
+            "[dbg 3cdfc3] session.create instance missing",
+            e instanceof Error ? e.stack || e.message : String(e),
+          )
+          throw e
+        }
         const body = c.req.valid("json") ?? {}
         const session = await Session.create(body)
         return c.json(session)
