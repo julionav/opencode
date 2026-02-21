@@ -32,6 +32,8 @@ import path from "path"
 import { Global } from "./global"
 import { JsonMigration } from "./storage/json-migration"
 import { Database } from "./storage/db"
+import { Runtime } from "@/runtime"
+import type { Database as BunClient } from "bun:sqlite"
 
 process.on("unhandledRejection", (e) => {
   Log.Default.error("rejection", {
@@ -83,6 +85,10 @@ const cli = yargs(hideBin(process.argv))
 
     const marker = path.join(Global.Path.data, "opencode.db")
     if (!(await Filesystem.exists(marker))) {
+      if (Runtime.mode() !== "bun") {
+        Log.Default.warn("skipping sqlite json migration (non-bun runtime)", { runtime: Runtime.mode() })
+        return
+      }
       const tty = process.stderr.isTTY
       process.stderr.write("Performing one time database migration, may take a few minutes..." + EOL)
       const width = 36
@@ -92,7 +98,7 @@ const cli = yargs(hideBin(process.argv))
       let last = -1
       if (tty) process.stderr.write("\x1b[?25l")
       try {
-        await JsonMigration.run(Database.Client().$client, {
+        await JsonMigration.run(Database.Client().$client as BunClient, {
           progress: (event) => {
             const percent = Math.floor((event.current / event.total) * 100)
             if (percent === last && event.current !== event.total) return

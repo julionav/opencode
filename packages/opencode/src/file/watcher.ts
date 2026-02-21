@@ -11,9 +11,10 @@ import { createWrapper } from "@parcel/watcher/wrapper"
 import { lazy } from "@/util/lazy"
 import { withTimeout } from "@/util/timeout"
 import type ParcelWatcher from "@parcel/watcher"
-import { $ } from "bun"
 import { Flag } from "@/flag/flag"
 import { readdir } from "fs/promises"
+import { Runtime } from "@/runtime"
+import { git } from "@/util/git"
 
 const SUBSCRIBE_TIMEOUT_MS = 10_000
 
@@ -46,6 +47,7 @@ export namespace FileWatcher {
 
   const state = Instance.state(
     async () => {
+      if (Runtime.mode() === "webcontainer") return {}
       if (Instance.project.vcs !== "git") return {}
       log.info("init")
       const cfg = await Config.get()
@@ -88,12 +90,8 @@ export namespace FileWatcher {
         if (sub) subs.push(sub)
       }
 
-      const vcsDir = await $`git rev-parse --git-dir`
-        .quiet()
-        .nothrow()
-        .cwd(Instance.worktree)
-        .text()
-        .then((x) => path.resolve(Instance.worktree, x.trim()))
+      const vcsDir = await git(["rev-parse", "--git-dir"], { cwd: Instance.worktree })
+        .then(async (x) => (x.exitCode === 0 ? path.resolve(Instance.worktree, (await x.text()).trim()) : undefined))
         .catch(() => undefined)
       if (vcsDir && !cfgIgnores.includes(".git") && !cfgIgnores.includes(vcsDir)) {
         const gitDirContents = await readdir(vcsDir).catch(() => [])

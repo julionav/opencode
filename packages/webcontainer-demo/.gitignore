@@ -1,0 +1,4 @@
+dist
+public/opencode/*
+!public/opencode/.gitkeep
+

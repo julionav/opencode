@@ -7,6 +7,7 @@ import { Instance } from "../project/instance"
 import { Flag } from "@/flag/flag"
 import { Log } from "../util/log"
 import type { MessageV2 } from "./message-v2"
+import { Runtime } from "@/runtime"
 
 const log = Log.create({ service: "instruction" })
 
@@ -98,13 +99,13 @@ export namespace InstructionPrompt {
           instruction = path.join(os.homedir(), instruction.slice(2))
         }
         const matches = path.isAbsolute(instruction)
-          ? await Array.fromAsync(
-              new Bun.Glob(path.basename(instruction)).scan({
-                cwd: path.dirname(instruction),
-                absolute: true,
-                onlyFiles: true,
-              }),
-            ).catch(() => [])
+          ? await Runtime.glob(path.basename(instruction), {
+              cwd: path.dirname(instruction),
+              absolute: true,
+              onlyFiles: true,
+              dot: true,
+              followSymlinks: true,
+            }).catch(() => [])
           : await resolveRelative(instruction)
         matches.forEach((p) => {
           paths.add(path.resolve(p))

@@ -7,16 +7,16 @@ import { Log } from "../util/log"
 import { Instance } from "../project/instance"
 import { lazy } from "@/util/lazy"
 import { Language } from "web-tree-sitter"
-
-import { $ } from "bun"
 import { Filesystem } from "@/util/filesystem"
 import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag.ts"
 import { Shell } from "@/shell/shell"
+import { Runtime } from "@/runtime"
 
 import { BashArity } from "@/permission/arity"
 import { Truncate } from "./truncation"
 import { Plugin } from "@/plugin"
+import { WebContainerShell } from "@/webcontainer/shell"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.OPENCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -36,11 +36,13 @@ const parser = lazy(async () => {
     with: { type: "wasm" },
   })
   const treePath = resolveWasm(treeWasm)
-  await Parser.init({
-    locateFile() {
-      return treePath
-    },
-  })
+  await Parser.init(
+    {
+      locateFile() {
+        return treePath
+      },
+    } as unknown as Parameters<typeof Parser.init>[0],
+  )
   const { default: bashWasm } = await import("tree-sitter-bash/tree-sitter-bash.wasm" as string, {
     with: { type: "wasm" },
   })
@@ -81,66 +83,67 @@ export const BashTool = Tool.define("bash", async () => {
         throw new Error(`Invalid timeout value: ${params.timeout}. Timeout must be a positive number.`)
       }
       const timeout = params.timeout ?? DEFAULT_TIMEOUT
-      const tree = await parser().then((p) => p.parse(params.command))
-      if (!tree) {
-        throw new Error("Failed to parse command")
-      }
       const directories = new Set<string>()
       if (!Instance.containsPath(cwd)) directories.add(cwd)
       const patterns = new Set<string>()
       const always = new Set<string>()
 
-      for (const node of tree.rootNode.descendantsOfType("command")) {
-        if (!node) continue
-
-        // Get full command text including redirects if present
-        let commandText = node.parent?.type === "redirected_statement" ? node.parent.text : node.text
-
-        const command = []
-        for (let i = 0; i < node.childCount; i++) {
-          const child = node.child(i)
-          if (!child) continue
-          if (
-            child.type !== "command_name" &&
-            child.type !== "word" &&
-            child.type !== "string" &&
-            child.type !== "raw_string" &&
-            child.type !== "concatenation"
-          ) {
-            continue
-          }
-          command.push(child.text)
+      if (Runtime.mode() === "webcontainer") {
+        patterns.add(params.command)
+        always.add("*")
+      } else {
+        const tree = await parser().then((p) => p.parse(params.command))
+        if (!tree) {
+          throw new Error("Failed to parse command")
         }
 
-        // not an exhaustive list, but covers most common cases
-        if (["cd", "rm", "cp", "mv", "mkdir", "touch", "chmod", "chown", "cat"].includes(command[0])) {
-          for (const arg of command.slice(1)) {
-            if (arg.startsWith("-") || (command[0] === "chmod" && arg.startsWith("+"))) continue
-            const resolved = await $`realpath ${arg}`
-              .cwd(cwd)
-              .quiet()
-              .nothrow()
-              .text()
-              .then((x) => x.trim())
-            log.info("resolved path", { arg, resolved })
-            if (resolved) {
-              // Git Bash on Windows returns Unix-style paths like /c/Users/...
-              const normalized =
-                process.platform === "win32" && resolved.match(/^\/[a-z]\//)
-                  ? resolved.replace(/^\/([a-z])\//, (_, drive) => `${drive.toUpperCase()}:\\`).replace(/\//g, "\\")
-                  : resolved
-              if (!Instance.containsPath(normalized)) {
-                const dir = (await Filesystem.isDir(normalized)) ? normalized : path.dirname(normalized)
-                directories.add(dir)
+        for (const node of tree.rootNode.descendantsOfType("command")) {
+          if (!node) continue
+
+          // Get full command text including redirects if present
+          let commandText = node.parent?.type === "redirected_statement" ? node.parent.text : node.text
+
+          const command = []
+          for (let i = 0; i < node.childCount; i++) {
+            const child = node.child(i)
+            if (!child) continue
+            if (
+              child.type !== "command_name" &&
+              child.type !== "word" &&
+              child.type !== "string" &&
+              child.type !== "raw_string" &&
+              child.type !== "concatenation"
+            ) {
+              continue
+            }
+            command.push(child.text)
+          }
+
+          // not an exhaustive list, but covers most common cases
+          if (["cd", "rm", "cp", "mv", "mkdir", "touch", "chmod", "chown", "cat"].includes(command[0])) {
+            for (const arg of command.slice(1)) {
+              if (arg.startsWith("-") || (command[0] === "chmod" && arg.startsWith("+"))) continue
+              const resolved = await Runtime.realpath(path.resolve(cwd, arg)).catch(() => "")
+              log.info("resolved path", { arg, resolved })
+              if (resolved) {
+                // Git Bash on Windows returns Unix-style paths like /c/Users/...
+                const normalized =
+                  process.platform === "win32" && resolved.match(/^\/[a-z]\//)
+                    ? resolved.replace(/^\/([a-z])\//, (_, drive) => `${drive.toUpperCase()}:\\`).replace(/\//g, "\\")
+                    : resolved
+                if (!Instance.containsPath(normalized)) {
+                  const dir = (await Filesystem.isDir(normalized)) ? normalized : path.dirname(normalized)
+                  directories.add(dir)
+                }
               }
             }
           }
-        }
 
-        // cd covered by above check
-        if (command.length && command[0] !== "cd") {
-          patterns.add(commandText)
-          always.add(BashArity.prefix(command).join(" ") + " *")
+          // cd covered by above check
+          if (command.length && command[0] !== "cd") {
+            patterns.add(commandText)
+            always.add(BashArity.prefix(command).join(" ") + " *")
+          }
         }
       }
 
@@ -168,6 +171,42 @@ export const BashTool = Tool.define("bash", async () => {
         { cwd, sessionID: ctx.sessionID, callID: ctx.callID },
         { env: {} },
       )
+
+      if (Runtime.mode() === "webcontainer") {
+        ctx.metadata({
+          metadata: {
+            output: "",
+            description: params.description,
+          },
+        })
+
+        const result = await WebContainerShell.exec({ cwd, command: params.command, timeout, abort: ctx.abort })
+
+        ctx.metadata({
+          metadata: {
+            output:
+              result.output.length > MAX_METADATA_LENGTH
+                ? result.output.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+                : result.output,
+            exit: result.exitCode,
+            description: params.description,
+          },
+        })
+
+        return {
+          title: params.description,
+          metadata: {
+            output:
+              result.output.length > MAX_METADATA_LENGTH
+                ? result.output.slice(0, MAX_METADATA_LENGTH) + "\n\n..."
+                : result.output,
+            exit: result.exitCode,
+            description: params.description,
+          },
+          output: result.output,
+        }
+      }
+
       const proc = spawn(params.command, {
         shell,
         cwd,

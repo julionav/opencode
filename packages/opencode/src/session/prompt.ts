@@ -32,7 +32,7 @@ import { Flag } from "../flag/flag"
 import { ulid } from "ulid"
 import { spawn } from "child_process"
 import { Command } from "../command"
-import { $, fileURLToPath, pathToFileURL } from "bun"
+import { fileURLToPath, pathToFileURL } from "url"
 import { ConfigMarkdown } from "../config/markdown"
 import { SessionSummary } from "./summary"
 import { NamedError } from "@opencode-ai/util/error"
@@ -46,6 +46,7 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Truncate } from "@/tool/truncation"
+import { Runtime } from "@/runtime"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1778,7 +1779,39 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const results = await Promise.all(
         shell.map(async ([, cmd]) => {
           try {
-            return await $`${{ raw: cmd }}`.quiet().nothrow().text()
+            if (Runtime.mode() === "webcontainer") {
+              return "Error executing command: markdown shell blocks are disabled in webcontainer mode"
+            }
+
+            const proc = spawn(cmd, {
+              shell: true,
+              cwd: Instance.directory,
+              stdio: ["ignore", "pipe", "pipe"],
+              detached: process.platform !== "win32",
+            })
+
+            let out = ""
+            proc.stdout?.on("data", (chunk) => {
+              out += chunk.toString()
+            })
+            proc.stderr?.on("data", (chunk) => {
+              out += chunk.toString()
+            })
+
+            const timeout = setTimeout(() => {
+              void Shell.killTree(proc)
+            }, 10_000)
+
+            const code = await new Promise<number>((resolve) => {
+              proc.on("close", (code) => resolve(code ?? 1))
+              proc.on("error", () => resolve(1))
+            })
+            clearTimeout(timeout)
+
+            if (code !== 0) {
+              return out.trim() ? out.trim() : `Error executing command: exited with code ${code}`
+            }
+            return out.trim()
           } catch (error) {
             return `Error executing command: ${error instanceof Error ? error.message : String(error)}`
           }

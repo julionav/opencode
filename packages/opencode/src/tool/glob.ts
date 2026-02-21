@@ -3,9 +3,9 @@ import path from "path"
 import { Tool } from "./tool"
 import { Filesystem } from "../util/filesystem"
 import DESCRIPTION from "./glob.txt"
-import { Ripgrep } from "../file/ripgrep"
 import { Instance } from "../project/instance"
 import { assertExternalDirectory } from "./external-directory"
+import { Runtime } from "@/runtime"
 
 export const GlobTool = Tool.define("glob", {
   description: DESCRIPTION,
@@ -36,21 +36,20 @@ export const GlobTool = Tool.define("glob", {
     const limit = 100
     const files = []
     let truncated = false
-    for await (const file of Ripgrep.files({
+    const matches = await Runtime.glob(params.pattern, {
       cwd: search,
-      glob: [params.pattern],
-      signal: ctx.abort,
-    })) {
+      absolute: true,
+      onlyFiles: true,
+      dot: true,
+      followSymlinks: true,
+    })
+    for (const full of matches) {
       if (files.length >= limit) {
         truncated = true
         break
       }
-      const full = path.resolve(search, file)
       const stats = Filesystem.stat(full)?.mtime.getTime() ?? 0
-      files.push({
-        path: full,
-        mtime: stats,
-      })
+      files.push({ path: full, mtime: stats })
     }
     files.sort((a, b) => b.mtime - a.mtime)
 

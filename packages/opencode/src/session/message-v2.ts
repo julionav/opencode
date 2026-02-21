@@ -13,8 +13,13 @@ import { STATUS_CODES } from "http"
 import { Storage } from "@/storage/storage"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
-import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
+
+type SystemErrorLike = {
+  code?: string
+  syscall?: string
+  message?: string
+}
 
 export namespace MessageV2 {
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
@@ -827,15 +832,15 @@ export namespace MessageV2 {
           },
           { cause: e },
         ).toObject()
-      case (e as SystemError)?.code === "ECONNRESET":
+      case (e as SystemErrorLike)?.code === "ECONNRESET":
         return new MessageV2.APIError(
           {
             message: "Connection reset by server",
             isRetryable: true,
             metadata: {
-              code: (e as SystemError).code ?? "",
-              syscall: (e as SystemError).syscall ?? "",
-              message: (e as SystemError).message ?? "",
+              code: (e as SystemErrorLike).code ?? "",
+              syscall: (e as SystemErrorLike).syscall ?? "",
+              message: (e as SystemErrorLike).message ?? "",
             },
           },
           { cause: e },
